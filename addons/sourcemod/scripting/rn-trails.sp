@@ -22,18 +22,13 @@
  */
 
 
-/*
- * PLAY AT THE REDNECK SERVERS!  http://steamcommunity.com/groups/redneckgraveyard 
- * The Redneck Servers are a place to come 'n play, shoot sum people 'n have sum family friendly fun! 
- */
-
 #include <sourcemod>
 #include <smlib>
 #include <sdkhooks>
 
 #include <sdktools_sound.inc>
 
-#define VERSION  "0.14"
+#define VERSION  "0.15"
 
 public Plugin:myinfo = {
 	name = "RN-Trails",
@@ -44,7 +39,7 @@ public Plugin:myinfo = {
 };
 
 
-new bool:_debug = true;
+new bool:_debug = false;
 
 #define MAX_TRAIL_ENTITIES	20	// Increase this if you have more than this number of entity defs in your config
 
@@ -56,6 +51,7 @@ new bool:_debug = true;
 #define TRAIL_EFFECT_DUST	Integer:5	// Dust can be laggy
 #define TRAIL_EFFECT_SPARK	Integer:6
 #define TRAIL_EFFECT_TESLA	Integer:7
+#define TRAIL_EFFECT_SMOKEPK 	Integer:8
 
 enum EEntityConfig
 {
@@ -193,7 +189,9 @@ public OnPluginStart()
 		}
 	}
 #endif
+	AddNormalSoundHook(BlockSound);
 	decho("OnPluginStart() finished");
+
 	return;
 }
 
@@ -247,6 +245,14 @@ public OnClientPutInServer(client)
 #endif
 }
 
+public Action:BlockSound(clients[64], &numClients, String:sample[PLATFORM_MAX_PATH], &entity, &channel, &Float:volume, &level, &pitch, &flags)
+{
+	if(StrEqual(sample,"weapons/grenade/tick1.wav")){
+		return(Plugin_Handled);
+	}
+	return(Plugin_Continue);
+}
+
 public Action:Event_TrackAttack(victim, &attacker, &inflictor, &Float:damage, &damagetype, &ammotype, hitbox, hitgroup)
 {
 	decho("TraceAttack: victim=%d,inflictor=%d,hitgroup=%d",victim,inflictor,hitgroup);
@@ -272,13 +278,21 @@ public OnEntityCreated(entid, const String:entityname[])
 	if(!_GetEntityConfig(entityname, entconfig)){
 		return;
 	}
+//	HookSingleEntityOutput(entid, "OnAwakened", OnEntityOutput_MotionEnabled);
 	SDKHook(entid,SDKHook_SpawnPost, OnEntitySpawned);
 	return;
 }
 
+public OnEntityOutput_MotionEnabled(const String:output[], caller, activator, Float:delay) 
+{
+	PrintToServer("OnEntityOutput_MotionEnabled output=%s caller=%d activator=%d delay=%f", output, caller, activator, delay);
+}
+
+
 public Action:OnEntitySpawned(entid)
 {
 	decl String:entityname[255];
+
 	if(GetEdictClassname(entid,entityname,sizeof(entityname))==false){
 		return(Plugin_Continue);
 	}
@@ -326,6 +340,11 @@ public Action:OnEntitySpawned(entid)
 			case(TRAIL_EFFECT_SMOKE):
 			{
 				smoke(position, entconfig[smoke_scale], entconfig[smoke_framerate]);
+			}
+			case(TRAIL_EFFECT_SMOKEPK):
+			{
+
+				PainKiller_CreateCloud(entid, "69 102 237", "69 102 238", 15.0);
 			}
 
 			case(TRAIL_EFFECT_RIBBON):
@@ -458,6 +477,9 @@ public _ParseWeaponConfig(kv, String:entname[])
 
 	if(StrEqual(buffer,"beam")) {
 		entconfig[trail_effect] = TRAIL_EFFECT_BEAM;
+
+	} else if(StrEqual(buffer,"smokepk")){
+		entconfig[trail_effect] = TRAIL_EFFECT_SMOKEPK;
 	} else if(StrEqual(buffer,"smoke")){
 		entconfig[trail_effect] = TRAIL_EFFECT_SMOKE;
 	} else if(StrEqual(buffer, "ribbon")) {
@@ -835,6 +857,9 @@ stock CreateLight(iEntity, entconfig[EEntityConfig], bool:bAttach = false, bool:
 		if (bAttach == true) {
 			SetVariantString("!activator");
 			AcceptEntityInput(iLight, "SetParent", iEntity, iLight, 0);            
+			decl strParent[5];
+			Format(strParent,sizeof(strParent), "%d", iEntity);
+			DispatchKeyValue(iLight, "Parent", strParent);
 			
 			if (StrEqual(strAttachmentPoint, "") == false)
 			{
@@ -1003,3 +1028,41 @@ stock decho(const String:myString[], any:...)
 	
 }
 
+stock PainKiller_CreateCloud(pent, String:Color1[], String:Color2[],  Float:Time, Float:Scale1 = 15.0, Float:Scale2 = 15.0, Float:vOffset = 0.0)
+{
+	if (!IsValidEntity(pent))
+	{
+		return -1;
+	}
+	
+	new Float:vOrigin[3];
+	
+	new ent = CreateEntityByName("env_smoketrail");
+	if (ent)
+	{		
+		DispatchKeyValue(ent, "startcolor", Color1);
+		DispatchKeyValue(ent, "endcolor", Color2);
+		DispatchKeyValueFloat(ent, "lifetime", Time);
+		DispatchKeyValueFloat(ent, "emittime", 60.0);
+		DispatchKeyValueFloat(ent, "startsize", Scale1);
+		DispatchKeyValueFloat(ent, "endsize", Scale2);
+		DispatchKeyValueFloat(ent, "minspeed", 15.0);
+		DispatchKeyValueFloat(ent, "maxspeed", 30.0);
+		DispatchKeyValueFloat(ent, "spawnradius", 15.0);
+		DispatchKeyValue(ent, "firesprite", "sprites/firetrail.spr");
+		DispatchKeyValue(ent, "smokesprite", "sprites/whitepuff.spr");
+
+		GetEntPropVector(pent, Prop_Send, "m_vecOrigin", vOrigin);
+		vOrigin[2] += vOffset;
+		TeleportEntity(ent, vOrigin, NULL_VECTOR, NULL_VECTOR);
+		DispatchSpawn(ent);
+
+		SetVariantString("!activator");
+		AcceptEntityInput(ent, "SetParent", pent, ent, 0);
+
+//		SetEntityMoveType(ent, MOVETYPE_NOCLIP);
+		
+	}
+
+	return ent;
+}
