@@ -1,6 +1,6 @@
 /*
- * rn-trails.sp: Redneck's custom trails
- * Thrown together by [foo] bar <foobarhl@gmail.com> | http://steamcommunity.com/id/foo-bar/
+ * rn-trails.sp: [foo] bar's Redneck Custom Trails
+ * Copyright (c) 2013 [foo] bar <foobarhl@gmail.com> | http://steamcommunity.com/id/foo-bar/
  *
  * With code from:
  *    vog_fireworks.sp by FlyingMongoose http://forums.alliedmods.net/showthread.php?t=71051 
@@ -28,12 +28,12 @@
 
 #include <sdktools_sound.inc>
 
-#define VERSION  "0.15"
+#define VERSION  "0.22"
 
 public Plugin:myinfo = {
 	name = "RN-Trails",
 	author = "[foo] bar",
-	description = "Redneck's custom trails",
+	description = "[foo] bar's redneck custom trails",
 	version = VERSION,
 	url = "http://www.sixofour.tk/~foobar/"
 };
@@ -57,8 +57,9 @@ enum EEntityConfig
 {
 /*	String:trail_effect[21], */
 
+	Integer:owner_offs,
 	Integer:trail_effect,
-
+	Integer:trail_effect_activate,	//"trail_effect_playeronly"
 	Integer:trail_beam_color_v4[4],
 	Float:trail_beam_time,
 	Float:trail_beam_iwidth,
@@ -116,21 +117,14 @@ enum EEntityConfigParams
 };
 
 
-#if 0
-new _entityConfigParams[][EEntityConfigParams]  = {
-	{"trail_effect", EENTPARAM_TYPE_STRING, 20, "" },
-	{"light", EENTPARAM_TYPE_INT, 0, 0 },
-	{"light_distance", EENTPARAM_TYPE_FLOAT, 0, 0  },
-	{"light_color", EENTPARAM_TYPE_VECTOR, 0, 0  },
-	{"light_time", EENTPARAM_TYPE_FLOAT, 0, 0 },
-	{"light_inner_cone", EENTPARAM_TYPE_FLOAT, 0, 0},
-	{"light_cone", EENTPARAM_TYPE_FLOAT, 0, 0},
-	{"light_brightness", EENTPARAM_TYPE_FLOAT, 0, 0},
-	{"light_spotlight_radius", EENTPARAM_TYPE_FLOAT, 0, 0},
-	{"light_pitch", EENTPARAM_TYPE_INT, 0, 0 },
-	{"ondeath_effect", EENTPARAM_TYPE_STRING, 0, 0 }
-};
-#endif
+#define ENTITY_STATE_UNKNOWN 	0
+#define ENTITY_STATE_CREATED 	1
+#define ENTITY_STATE_SPAWNED 	2
+#define ENTITY_STATE_GF		3
+#define ENTITY_STATE_GF2	4
+#define ENTITY_STATE_DEAD	9
+
+new Integer:entity_state[2048];	// bleh
 
 new String:configfile[PLATFORM_MAX_PATH]="";
 new Handle:configkv = INVALID_HANDLE;
@@ -139,10 +133,6 @@ new smokeModel2;
 new firelineModel;
 
 new g_ExplosionSprite;
-#if 0
-new g_Smoke1;
-new g_Smoke2;
-#endif
 new g_BlueGlowSprite;
 new g_RedGlowSprite;
 new g_GreenGlowSprite;
@@ -152,9 +142,7 @@ new g_OrangeGlowSprite;
 new g_WhiteGlowSprite;
 
 new g_BlueLaser;
-#if 0
-new g_Gibs;
-#endif
+
 
 new g_iLaserSprite;
 
@@ -164,9 +152,13 @@ new g_iLaserSprite;
 #define WEPCFG_LIGHT_EFFECT 1
 #define WEPCFG_ONDEATH_EFFECT 2
 
-new entityConfig[MAX_TRAIL_ENTITIES][EEntityConfig];//  = false;
-new String:entityConfigIdx[MAX_TRAIL_ENTITIES][50];
-new entityConfigIdxc=0;
+#define MAX_GROUPS 3	// 0 = everything, 1 = team 1, 2 = team 2
+
+new entityConfig[MAX_GROUPS][MAX_TRAIL_ENTITIES][EEntityConfig];//  = false;
+new String:entityConfigIdx[MAX_GROUPS][MAX_TRAIL_ENTITIES][50];
+new Integer:entityConfigIdxc[MAX_GROUPS];
+
+
 
 
 
@@ -214,26 +206,34 @@ public OnMapStart()
 //	 g_iLaserSprite = PrecacheModel("materials/sprites/crystal_beam1.vmt");
 	g_iLaserSprite = PrecacheModel("materials/sprites/laser.vmt");
 
-	for(new i=0; i<entityConfigIdxc; i++){
-		new entid=-1;
-		if(strlen(entityConfig[i][sound_file])>0){
-			decl String:buffer2[200];
-			decho("Using %s", entityConfig[i][sound_file]);
-			PrecacheSound(entityConfig[i][sound_file],true);
-			Format(buffer2,sizeof(buffer2),"sound/%s",entityConfig[i][sound_file]);
+	decl Integer:grpidx;
+	for(grpidx = 0;  grpidx < MAX_GROUPS; grpidx++) {
+		for(new i=0; i<entityConfigIdxc[grpidx]; i++){
+			new entid=-1;
+			if(strlen(entityConfig[grpidx][i][sound_file])>0){
+				decl String:buffer2[200];
+				decho("Using %s", entityConfig[grpidx][i][sound_file]);
+				PrecacheSound(entityConfig[grpidx][i][sound_file],true);
+				Format(buffer2,sizeof(buffer2),"sound/%s",entityConfig[grpidx][i][sound_file]);
 
-			decho("rn-trails: AddFileToDownloadsTable %s",buffer2);
-			AddFileToDownloadsTable(buffer2);
+				decho("rn-trails: AddFileToDownloadsTable %s",buffer2);
+				AddFileToDownloadsTable(buffer2);
 
-		}
+			}
 
-		while( (entid=FindEntityByClassname(entid, entityConfigIdx[i])) != -1 ){
-			decho("Hook entity (in map startup) %d", entid);
-			SDKHook(entid, SDKHook_SpawnPost, OnEntitySpawned);
-			OnEntitySpawned(entid);	// xxx: 
+			while( (entid=FindEntityByClassname(entid, entityConfigIdx[grpidx][i])) != -1 ){
+				decho("Hook entity (in map startup) %d", entid);
+				SDKHook(entid, SDKHook_SpawnPost, OnEntitySpawned);
+				OnEntitySpawned(entid);	// xxx: 
+			}
 		}
 	}
 	decho("OnMapStart() finished");
+#if defined USETIMER
+	if(CreateTimer(0.1, TrailsTimer, _, TIMER_REPEAT)==false){
+		SetFailState("Could not create master timer!");
+	}
+#endif
 	return;
 }
 
@@ -270,16 +270,20 @@ public Event_SdkHookOnTakeDamagePost(victim, attacker, inflictor, Float:damage, 
 
 public OnEntityCreated(entid, const String:entityname[])
 {
+	new grpid = 0;
+
 	decl entconfig[EEntityConfig];
 	if(!IsValidEntity(entid)){
 		decho("rn-trails: OnEntityCreated(%d, %s) is invalid!", entid, entityname);
 		return;
 	}	
-	if(!_GetEntityConfig(entityname, entconfig)){
-		return;
-	}
+
+	entity_state[entid] = ENTITY_STATE_CREATED;
+
 //	HookSingleEntityOutput(entid, "OnAwakened", OnEntityOutput_MotionEnabled);
+
 	SDKHook(entid,SDKHook_SpawnPost, OnEntitySpawned);
+
 	return;
 }
 
@@ -288,154 +292,183 @@ public OnEntityOutput_MotionEnabled(const String:output[], caller, activator, Fl
 	PrintToServer("OnEntityOutput_MotionEnabled output=%s caller=%d activator=%d delay=%f", output, caller, activator, delay);
 }
 
+public Integer:MyGetEntityOwner(entid, String:entityname[])
+{
+	decl String:netClsName[255];
+	new Integer:ownerOffs;
+	new owner=-1;	
+
+//	decho("Just for shits and giggles: m_iTeamNum for %d/%s is %d", entid, entityname, GetEntPropEnt(entid, Prop_Send, "m_iTeamNum"));
+	owner = GetEntPropEnt(entid, Prop_Send, "m_hOwnerEntity");
+//	decho("GetEntPropEnt %d/%s m_hOwnerEntity = %d", entid, entityname, owner);
+	if(owner>=0){
+		return owner;
+	}
+
+	if(GetEntityNetClass(entid, netClsName, sizeof(netClsName))==false){
+		return 0;	// just default to world
+	}
+
+	ownerOffs = FindSendPropInfo(netClsName, "m_hOwnerEntity");
+	if(ownerOffs>0){
+		owner = GetEntDataEnt2(entid, ownerOffs);
+
+//		decho("GetEntDataEnt2 m_hOwnerEntity = %d", owner);
+	}
+
+		if(owner<0)
+			return 0;
+	return owner;
+}
+
+Integer:MyGetClientTeam(client)
+{
+	if(client==0)
+		return(0);
+	new Integer:t = GetClientTeam(client);
+	if(t<=1)
+		return(0);
+	return(t-1);
+}
 
 public Action:OnEntitySpawned(entid)
 {
-	decl String:entityname[255];
-
-	if(GetEdictClassname(entid,entityname,sizeof(entityname))==false){
-		return(Plugin_Continue);
-	}
-
-	new Float:position[3];
-	new entconfig[EEntityConfig];
-
-//	decho("New entity spawned %d created as %s", entid, entityname);
-
-	if(_GetEntityConfig(entityname, entconfig)==false){
-		return(Plugin_Continue);
-	}
-
-//	decho("New entity %d created as %s", entid, entityname);
-//	_DumpWeaponConfig(entityname,entconfig);
-
-	if(entconfig[light] != TRAIL_EFFECT_NONE ){
-		if(entconfig[light] == Integer:999 ) {
-			StrikersCreateLight(entid, "65 105 225 128", 15.0, 5.0, true);
-		} else {
-			CreateLight(entid, entconfig, true, false);
-		}
-	}
-
-	GetEntPropVector(entid,Prop_Send,"m_vecOrigin",position);
-
-	if(strlen(String:entconfig[trail_effect]) > 0 ) {
-		switch(entconfig[trail_effect]){
-			case(TRAIL_EFFECT_BEAM):
-			{
-//				decho("CreateBeam(%d,...)", entid);
-				CreateBeam(entid, entconfig);
-#if 0
-				new color[4] = {0,0,0,0};
-				color[0] = entconfig[trail_beam_color_v4][0];
-				color[1] = entconfig[trail_beam_color_v4][1];
-				color[2] = entconfig[trail_beam_color_v4][2];
-				color[3] = entconfig[trail_beam_color_v4][3];
-		
-				TE_SetupBeamFollow(entid,g_iLaserSprite,0,2.0,10.0,10.0,10,color);
-				TE_SendToAll();
-#endif
-			}
-
-			case(TRAIL_EFFECT_SMOKE):
-			{
-				smoke(position, entconfig[smoke_scale], entconfig[smoke_framerate]);
-			}
-			case(TRAIL_EFFECT_SMOKEPK):
-			{
-
-				PainKiller_CreateCloud(entid, "69 102 237", "69 102 238", 15.0);
-			}
-
-			case(TRAIL_EFFECT_RIBBON):
-			{
-				ribbon(position);
-			}
-
-			case(TRAIL_EFFECT_ENERGY):
-			{
-				energy(position);
-			}
-			case(TRAIL_EFFECT_SPARK): {
-				spark(position,entconfig[sparks_scale],entconfig[sparks_framerate]);				
-			}
-			case(TRAIL_EFFECT_TESLA): {
-				CreateTesla(entid, entconfig);
-
-			}
-
-		}
-	}
-	if(strlen(entconfig[sound_file]) > 0){
-//		decho("Playing %s", entconfig[sound_file]);
-		EmitAmbientSound(entconfig[sound_file],position,entid);
-	}
+	entity_state[entid] = ENTITY_STATE_SPAWNED;
 	return(Plugin_Continue);
 }
 
+#if defined USETIMER
+public Action:TrailsTimer(Handle:timer)
+#else
 public OnGameFrame()
+#endif
 {
-	if(entityConfigIdxc==0){
-		return;
-	}
-
 	new entid = -1;
 	new Float:position[3];
 	decl String:entityname[100];
 	
 	decl entconfig[EEntityConfig];	
 
-	for(new i2 = 0; i2 < sizeof(entityConfigIdx); i2++){
-		
-		if(_GetEntityConfig(entityConfigIdx[i2], entconfig)==false){
-			continue;
-		}
+	decl Integer:i2max;
 
-		if(entconfig[trail_effect] == TRAIL_EFFECT_NONE ) {
-			continue;
-		}
-		strcopy(entityname,sizeof(entityname), entityConfigIdx[i2]);
-		entid = -1;
-		while((entid = Entity_FindByClassName(entid,entityname))>0)
-		{
-//			decho("  Doing %d to %s",entconfig[trail_effect], entityname);
-			GetEntPropVector(entid,Prop_Send,"m_vecOrigin",position);
-			switch(entconfig[trail_effect]){
-				case(TRAIL_EFFECT_SMOKE): {
-					smoke(position,entconfig[smoke_scale],entconfig[smoke_framerate]);
-				} 
-				case(TRAIL_EFFECT_ENERGY): {
-					energy(position);
+//	i2max = sizeof(entityConfigIdx[grpid]);
+//decho("Ping");
+	new Integer:owner;
+	for(new i = MAX_GROUPS-1; i >=0; i--) {	// run through reverse groups first.  world comes last.
+		for(new i2 = 0; i2 < MAX_TRAIL_ENTITIES; i2++){
+		
+			if(entityConfigIdx[i][i2][0]=='\0'){
+				break;
+			}
+
+			if(_GetEntityConfig(i,entityConfigIdx[i][i2], entconfig)==false){
+				continue;
+			}
+
+			if(entconfig[trail_effect] == TRAIL_EFFECT_NONE ) {
+				break;
+			}
+
+			strcopy(entityname,sizeof(entityname), entityConfigIdx[i][i2]);
+			entid = -1;
+		
+			while((entid = Entity_FindByClassName(entid,entityname))>0)
+			{
+
+
+				owner = MyGetEntityOwner(entid, entityname);
+//decho("Team is %d/%d %d", MyGetClientTeam(owner),i, owner);
+				if(MyGetClientTeam(owner) != i)
+					continue;
+
+				if(entity_state[entid] == ENTITY_STATE_GF)
+					entity_state[entid] = ENTITY_STATE_GF2;
+				else if(entity_state[entid] < ENTITY_STATE_GF)
+					entity_state[entid] = ENTITY_STATE_GF;
+
+
+				if(entconfig[trail_effect_activate] == 1 && (owner < 0 || owner > MaxClients)){
+					PrintToServer("Not applying trail to %s - owner = %d", entityname, owner);
+					continue;
 				}
-				case(TRAIL_EFFECT_SPARK): {
-					spark(position,entconfig[sparks_scale],entconfig[sparks_framerate]);
+
+				if(entity_state[entid] == ENTITY_STATE_GF){
+					// first frame from onspawn 
+					if(entconfig[light] != TRAIL_EFFECT_NONE ){
+						if(entconfig[light] == Integer:999 ) {
+							StrikersCreateLight(entid, "65 105 225 128", 15.0, 5.0, true);
+						} else {
+							CreateLight(entid, entconfig, true, false);
+						}
+					}
+
+					if(strlen(entconfig[sound_file]) > 0){
+						EmitAmbientSound(entconfig[sound_file],position,entid);
+					}
+
 				}
-				case(TRAIL_EFFECT_DUST):{
-					dust(position,entconfig[dust_scale],entconfig[dust_framerate]);
+
+//				decho("  Doing %d to %s",entconfig[trail_effect], entityname);
+
+//				decho("%s owner is %d", entityname,owner);
+				
+				GetEntPropVector(entid,Prop_Send,"m_vecOrigin",position);
+				switch(entconfig[trail_effect]){
+					case(TRAIL_EFFECT_BEAM):
+					{
+		//				decho("CreateBeam(%d,...)", entid);
+						if(entity_state[entid] == ENTITY_STATE_GF){	// only initiate once right after spawn.  follows entity
+							CreateBeam(entid, entconfig);
+						}
+					}
+					case(TRAIL_EFFECT_SMOKEPK):
+					{
+						if(entity_state[entid] == ENTITY_STATE_GF){		// only initiate once right after spawn - this one has a movement parent
+							PainKiller_CreateCloud(entid, "69 102 237", "69 102 238", 15.0);
+						}
+					}
+
+					case(TRAIL_EFFECT_SMOKE): {
+						smoke(position,entconfig[smoke_scale],entconfig[smoke_framerate]);
+					} 
+					case(TRAIL_EFFECT_ENERGY): {
+						energy(position);
+					}
+					case(TRAIL_EFFECT_SPARK): {
+						spark(position,entconfig[sparks_scale],entconfig[sparks_framerate]);
+					}
+					case(TRAIL_EFFECT_DUST):{
+						dust(position,entconfig[dust_scale],entconfig[dust_framerate]);
+					}
+					case(TRAIL_EFFECT_RIBBON): {
+	//					FireSprites(position);//,scale,framerate);
+						ribbon(position);
+					}
+					case(TRAIL_EFFECT_TESLA): {
+						if(entity_state[entid] == ENTITY_STATE_GF){						
+							CreateTesla(entid, entconfig);
+						}
+					}
+
+//					decho("rn-trails: Unknown effect '%d'  configured for %s!", entconfig[trail_effect], entityname);
 				}
-				case(TRAIL_EFFECT_RIBBON): {
-	//				FireSprites(position);//,scale,framerate);
-					ribbon(position);
-				}
-				case(TRAIL_EFFECT_TESLA): {
-				}
-//				decho("rn-trails: Unknown effect '%d'  configured for %s!", entconfig[trail_effect], entityname);
 			}
 		}
 
 	}
-	return;
+	return Plugin_Continue;
+
 }
 
-public bool:_GetEntityConfig(const String:entname[], entconfig[EEntityConfig])
+public bool:_GetEntityConfig(Integer:grpid, const String:entname[], entconfig[EEntityConfig])
 {
-	if(entityConfigIdxc == 0 ){
+	if(entityConfigIdxc[grpid] == 0 ){
 		return(false);
 	}
-	for(new i = 0; i < entityConfigIdxc; i++ ) {
-		if(StrEqual(entname, entityConfigIdx[i])){
-			entconfig = entityConfig[i];
-			return(true);//entityConfig[i]);
+	for(new i = 0; i < entityConfigIdxc[grpid]; i++ ) {
+		if(StrEqual(entname, entityConfigIdx[grpid][i])){
+			entconfig = entityConfig[grpid][i];
+			return(true);
 		}
 	}
 	return(false);
@@ -466,13 +499,21 @@ public ColorStringToV4(const String:cstr[], v4arr[])
 	v4arr[3] = StringToInt(buffer[3]);
 }
 
-public _ParseWeaponConfig(kv, String:entname[])
+public _ParseWeaponConfig(kv, Integer:grpid, String:entname[])
 {
 	decl String:buffer[200];
 	new entconfig[EEntityConfig];
+	_GetEntityConfig(grpid, entname, entconfig);
 
-	_GetEntityConfig(entname, entconfig);
-	
+#if 0
+	KvGetString(kv, "class_name", clsname, sizeof(clsname), "");
+	if(clsname[0]!='\0'){
+		entconfig[owner_offs] = FindSendPropInfo(clsname,"m_hOwnerEntity");
+	}
+	decho("Owner offset for %s is %d", entname, entconfig[owner_offs]);
+#endif
+
+
 	KvGetString(kv, "trail_effect", buffer, sizeof(buffer), "");
 
 	if(StrEqual(buffer,"beam")) {
@@ -491,6 +532,8 @@ public _ParseWeaponConfig(kv, String:entname[])
 	} else if(StrEqual(buffer,"tesla")) {
 		entconfig[trail_effect] = TRAIL_EFFECT_TESLA;
 	}
+
+	entconfig[trail_effect_activate] = KvGetNum(kv, "trail_effect_activate", 0);
 
 	KvGetString(kv, "trail_beam_color", buffer, sizeof(buffer), "0 0 0 0");
 	ColorStringToV4(buffer, entconfig[trail_beam_color_v4]);
@@ -537,9 +580,11 @@ public _ParseWeaponConfig(kv, String:entname[])
 	entconfig[smoke_framerate] = KvGetFloat(kv, "smoke_framerate", 15.0);
 
 	
-	entityConfig[entityConfigIdxc] = entconfig;
-	strcopy(entityConfigIdx[entityConfigIdxc], 100, entname);
-	entityConfigIdxc++;
+	entityConfig[grpid][entityConfigIdxc[grpid]] = entconfig;
+	strcopy(entityConfigIdx[grpid][entityConfigIdxc[grpid]], 100, entname);
+	entityConfigIdxc[grpid]++;
+//	_DumpWeaponConfig(entname,entconfig);
+	decho("Read config for %d/%s", grpid, entname);
 }
 
 public _ParseConfig(kv)
@@ -554,14 +599,30 @@ public _ParseConfig(kv)
 			KvGotoFirstSubKey(kv);
 			do {
 				KvGetSectionName(kv, buffer2, sizeof(buffer2));
-				_ParseWeaponConfig(kv, buffer2);
-			}while(KvGotoNextKey(kv,false));
-			KvGoBack(kv);			
-			
-		}
+				new grpid = StringToInt(buffer2);
+				PrintToServer("parse weapon config grpid=%d / %s", grpid, buffer2);
+#if 1
+				if(KvGotoFirstSubKey(kv,false)==false){
+					continue;
+					SetFailState("Section %s had no sub!", buffer2);
+				} else {
+					do {
+						KvGetSectionName(kv, buffer2, sizeof(buffer2));
+						PrintToServer("  parse grpid=%d section=%s", grpid, buffer2);
+						_ParseWeaponConfig(kv, grpid, buffer2);
+					
+					} while(KvGotoNextKey(kv,false));
+					KvGoBack(kv);
+				}
+#endif
 
-	} while(KvGotoNextKey(kv, false));
-	KvGoBack(kv);
+			} while(KvGotoNextKey(kv));
+
+			KvGoBack(kv);
+		} else {
+			decho("Ignore top level key %s", section);
+		}
+	} while(KvGotoNextKey(kv));
 
 
 }
@@ -579,9 +640,6 @@ public LoadConfig()
 		CloseHandle(configkv);
 	}
 
-	if(entityConfigIdxc != 0){
-		PrintToServer("rn-trails LoadConfig() entityConfigIdxc is %d!", entityConfigIdxc);
-	}
 	configkv = CreateKeyValues("configfile");
 
 	FileToKeyValues(configkv,configfile);
@@ -775,16 +833,26 @@ public Action:Event_PlayerDeath(Handle:event, const String:entname[], bool:dontB
 	new weapon[40];
 
 	new client = GetClientOfUserId(GetEventInt(event, "userid"));
+        new attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
+
 	new Float:clivec[3] = {0,0,0};
 
 	GetEventString(event,"weapon",weapon,sizeof(weapon));
 	
-	if(strcmp(weapon,"crossbow_bolt",false)==0){
+	if( strcmp(weapon,"crossbow_bolt",false)==0) {
+		decl entconfig[EEntityConfig];
+
+		if(_GetEntityConfig(MyGetClientTeam(attacker), weapon, entconfig)==false){
+			return Plugin_Continue;
+		}
+
 		decho("Player killed by crossbow");
-		GetClientAbsOrigin(client,clivec);
-		explode(clivec);
-	//	dust(clivec,1.0,1.0);
-		sphere(clivec);	// this is fireworks
+		if(StrEqual(entconfig[ondeath_effect],"fireworks")){	// todo: add more. 
+			GetClientAbsOrigin(client,clivec);
+			explode(clivec);
+		//	dust(clivec,1.0,1.0);
+			sphere(clivec);	// this is fireworks
+		}
 	}
 
 	return(Plugin_Continue);
