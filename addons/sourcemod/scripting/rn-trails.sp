@@ -124,7 +124,7 @@ enum EEntityConfigParams
 #define ENTITY_STATE_GF2	4
 #define ENTITY_STATE_DEAD	9
 
-new Integer:entity_state[2048];	// bleh
+new Integer:entity_state[4096];	// bleh
 
 new String:configfile[PLATFORM_MAX_PATH]="";
 new Handle:configkv = INVALID_HANDLE;
@@ -277,6 +277,10 @@ public OnEntityCreated(entid, const String:entityname[])
 		decho("rn-trails: OnEntityCreated(%d, %s) is invalid!", entid, entityname);
 		return;
 	}	
+
+	if(entid < 0 || entid > sizeof(entity_state)){
+		PrintToServer("Entity id %d exceeds entity_state size!");
+	}
 
 	entity_state[entid] = ENTITY_STATE_CREATED;
 
