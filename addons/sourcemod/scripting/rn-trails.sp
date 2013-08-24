@@ -28,7 +28,7 @@
 
 #include <sdktools_sound.inc>
 
-#define VERSION  "0.22"
+#define VERSION  "0.23"
 
 public Plugin:myinfo = {
 	name = "RN-Trails",
