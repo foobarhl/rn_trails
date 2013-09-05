@@ -28,7 +28,7 @@
 
 #include <sdktools_sound.inc>
 
-#define VERSION  "0.23"
+#define VERSION  "0.26"
 
 public Plugin:myinfo = {
 	name = "RN-Trails",
@@ -39,7 +39,7 @@ public Plugin:myinfo = {
 };
 
 
-new bool:_debug = false;
+new bool:_debug = true;
 
 #define MAX_TRAIL_ENTITIES	20	// Increase this if you have more than this number of entity defs in your config
 
@@ -87,16 +87,16 @@ enum EEntityConfig
 	dust_scale,
 	dust_framerate,
 
-	String:tesla_color[16],
-	tesla_radius,
-	tesla_beamcount_min,	//int
-	tesla_beamcount_max, //int
-	tesla_thick_min[10],
-	tesla_thick_max[10],
-	tesla_lifetime_min[10],
-	tesla_lifetime_max[10],
-	tesla_interval_min[10],
-	tesla_interval_max[10],
+	String:tesla_color[12],
+	Integer:tesla_radius,
+	Integer:tesla_beamcount_min,	//int
+	Integer:tesla_beamcount_max, //int
+	String:tesla_thick_min[6],
+	String:tesla_thick_max[6],
+	String:tesla_lifetime_min[6],
+	String:tesla_lifetime_max[6],
+	String:tesla_interval_min[6],
+	String:tesla_interval_max[6],
 
 	ondeath_effect[20],
 	onhurt_effect[20]
@@ -142,7 +142,7 @@ new g_OrangeGlowSprite;
 new g_WhiteGlowSprite;
 
 new g_BlueLaser;
-
+new g_TeslaTexture;
 
 new g_iLaserSprite;
 
@@ -205,6 +205,7 @@ public OnMapStart()
 	g_WhiteGlowSprite = PrecacheModel("materials/sprites/glow1.vmt",true);
 //	 g_iLaserSprite = PrecacheModel("materials/sprites/crystal_beam1.vmt");
 	g_iLaserSprite = PrecacheModel("materials/sprites/laser.vmt");
+	g_TeslaTexture = PrecacheModel("sprites/physbeam.vmt");
 
 	decl Integer:grpidx;
 	for(grpidx = 0;  grpidx < MAX_GROUPS; grpidx++) {
@@ -370,7 +371,7 @@ public OnGameFrame()
 			}
 
 			if(entconfig[trail_effect] == TRAIL_EFFECT_NONE ) {
-				break;
+//				break;
 			}
 
 			strcopy(entityname,sizeof(entityname), entityConfigIdx[i][i2]);
@@ -488,6 +489,8 @@ public _DumpWeaponConfig(const String:entname[], entconfig[EEntityConfig])
 	decho("  light_color: %s", entconfig[light_color]);
 //	decho("  trail_beam_color: %s", entconfig[trail_beam_color]);
 	decho("  trail_beam_color_v4: %d %d %d %d", entconfig[trail_beam_color_v4][0], entconfig[trail_beam_color_v4][1], entconfig[trail_beam_color_v4][2], entconfig[trail_beam_color_v4][3]);
+	decho("  tesla_radius=%d tesla_bcmin=%d tesla_bcmax=%d tesla_thick_min=%s tesla_thick_max=%s tesla_lifetime_min=%s tesla_lifetime_max=%s tesla_interval_min=%s tesla_interval_max=%s tesla_color=%s", 
+		entconfig[tesla_radius], entconfig[tesla_beamcount_min], entconfig[tesla_beamcount_max], entconfig[tesla_thick_min], entconfig[tesla_thick_max], entconfig[tesla_lifetime_min], entconfig[tesla_lifetime_max], entconfig[tesla_interval_min], entconfig[tesla_interval_max], entconfig[tesla_color]);
 	return;
 }
 
@@ -563,16 +566,16 @@ public _ParseWeaponConfig(kv, Integer:grpid, String:entname[])
 	entconfig[light_spotlight_radius] = KvGetFloat(kv, "light_spotlight_radius", 0.00);
 	entconfig[light_pitch] = KvGetNum(kv, "light_pitch", 0);
 
-	KvGetString(kv, "tesla_color", buffer, sizeof(buffer), "128 128 128 128");
-	entconfig[tesla_radius] = KvGetNum(kv, "tesla_radius", 15);
-	entconfig[tesla_beamcount_min] = KvGetNum(kv, "tesla_beamcount_min", 1);
-	entconfig[tesla_beamcount_max] = KvGetNum(kv, "tesla_maxeams", 15);
+	KvGetString(kv, "tesla_color", entconfig[tesla_color], sizeof(entconfig[tesla_color]), "255 255 255");
+	entconfig[tesla_radius] = KvGetNum(kv, "tesla_radius", 100.0);
+	entconfig[tesla_beamcount_min] = KvGetNum(kv, "tesla_beamcount_min", 1.0);
+	entconfig[tesla_beamcount_max] = KvGetNum(kv, "tesla_beamcount_max", 15.0);
 	KvGetString(kv, "tesla_thick_min", entconfig[tesla_thick_min], sizeof(entconfig[tesla_thick_min]), "1");
-	KvGetString(kv, "tesla_thick_max", entconfig[tesla_thick_max], sizeof(entconfig[tesla_thick_max]), "1");
+	KvGetString(kv, "tesla_thick_max", entconfig[tesla_thick_max], sizeof(entconfig[tesla_thick_max]), "10");
 	KvGetString(kv, "tesla_lifetime_min", entconfig[tesla_lifetime_min], sizeof(entconfig[tesla_lifetime_min]), "1");
 	KvGetString(kv, "tesla_lifetime_max", entconfig[tesla_lifetime_max], sizeof(entconfig[tesla_lifetime_max]), "5");
-	KvGetString(kv, "tesla_interval_min", entconfig[tesla_interval_min], sizeof(entconfig[tesla_interval_min]), "1");
-	KvGetString(kv, "tesla_interval_max", entconfig[tesla_interval_max], sizeof(entconfig[tesla_interval_max]), "5");
+	KvGetString(kv, "tesla_interval_min", entconfig[tesla_interval_min], sizeof(entconfig[tesla_interval_min]), "0.1");
+	KvGetString(kv, "tesla_interval_max", entconfig[tesla_interval_max], sizeof(entconfig[tesla_interval_max]), "0.2");
 	
 	
 	KvGetString(kv, "ondeath_effect", entconfig[ondeath_effect], sizeof(entconfig[ondeath_effect]), "");
@@ -897,7 +900,7 @@ public DispatchKeyValueInt(ent, const String:var[], Integer:val)
 	decl String:buffer[50];
 	//IntToString(_:val, buffer, sizeof(buffer));
 	Format(buffer, sizeof(buffer), "%d", val);
-//	decho("DispatchKeyValue(%d,%s,%s) (was %d)", ent, var, buffer,val);
+	decho("DispatchKeyValue(%d,%s,%s) (was %d)", ent, var, buffer,val);
 	return(DispatchKeyValue(ent, var, buffer));
 }
 
@@ -957,7 +960,7 @@ stock CreateLight(iEntity, entconfig[EEntityConfig], bool:bAttach = false, bool:
 }
 
 // From striker_hl2dm_epicexplosions.sp for testing reasons. Set light = 999 to use this instead of the ported version above
-stock StrikersCreateLight(iEntity, String:strColor[], Float:distance, Float:time, bool:bAttach = false, bool:bKill = false, String:strAttachmentPoint[]="")
+stock StrikersCreateLight(iEntity, String:strColor[], Float:distance, Float:time, bool:bAttach = false, bool:bKill = true, String:strAttachmentPoint[]="")
 {
 	if ( !IsValidEdict(iEntity))
 	{
@@ -1001,7 +1004,7 @@ stock StrikersCreateLight(iEntity, String:strColor[], Float:distance, Float:time
 		AcceptEntityInput(iLight, "TurnOn");
 	}
 	
-	if(bKill == true)
+	if(bKill == true && time != 0)
 	{
 		CreateTimer(time, Timer_KillLight, iLight);
 	}
@@ -1047,12 +1050,34 @@ public Action:Timer_KillLight(Handle:timer, any:entity)
 
 stock CreateTesla(entid,  entconfig[EEntityConfig], bool:bAttach=true)
 {
+_DumpWeaponConfig("", entconfig);
 	new tesla = CreateEntityByName("point_tesla");
 	if(IsValidEntity(tesla)){
+#if 1
+	new String:sz_parentname[32];
+
+	Format(sz_parentname, sizeof(sz_parentname), "%d", entid);
+	DispatchKeyValue(tesla, "parentname", sz_parentname);
+
+//		DispatchKeyValueInt(tesla, "m_flRadius", entconfig[tesla_radius]);
+	DispatchKeyValue(tesla, "m_flRadius", "96.0");
+		DispatchKeyValue(tesla, "m_SoundName", "DoSpark");
+
+//		DispatchKeyValueInt(tesla, "beamcount_min", entconfig[tesla_beamcount_min]);
+//		DispatchKeyValueInt(tesla, "beamcount_max", entconfig[tesla_beamcount_max]);
+	DispatchKeyValue(tesla, "beamcount_min", "4");
+	DispatchKeyValue(tesla, "beamcount_max", "6");
+		DispatchKeyValue(tesla, "texture", "sprites/physbeam.vmt");
+
+//	DispatchKeyValue(tesla, "m_Color", "255 255 255");
+//	DispatchKeyValue(tesla, "thick_min", "1.0");
+//	DispatchKeyValue(tesla, "thick_max", "10.0");
+//	DispatchKeyValue(tesla, "lifetime_min", "0.3");
+//	DispatchKeyValue(tesla, "lifetime_max", "0.3");
+//	DispatchKeyValue(tesla, "interval_min", "0.1");
+//	DispatchKeyValue(tesla, "interval_max", "0.2");
+
 		DispatchKeyValue(tesla, "m_Color", entconfig[tesla_color]);
-		DispatchKeyValueInt(tesla, "m_flRadius", entconfig[tesla_radius]);
-		DispatchKeyValueInt(tesla, "beamcount_min", entconfig[tesla_beamcount_min]);
-		DispatchKeyValueInt(tesla, "beamcount_max", entconfig[tesla_beamcount_max]);
 		DispatchKeyValue(tesla, "thick_min", entconfig[tesla_thick_min]);
 		DispatchKeyValue(tesla, "thick_max", entconfig[tesla_thick_max]);
 		DispatchKeyValue(tesla, "lifetime_min", entconfig[tesla_lifetime_min]);
@@ -1060,13 +1085,41 @@ stock CreateTesla(entid,  entconfig[EEntityConfig], bool:bAttach=true)
 		DispatchKeyValue(tesla, "interval_min", entconfig[tesla_interval_min]);
 		DispatchKeyValue(tesla, "interval_max", entconfig[tesla_interval_max]);
 
+#else
+	new String:sz_lasername[32];
+	new String:sz_parentname[32];
 
+	Format(sz_parentname, sizeof(sz_parentname), "%d", entid);
+	DispatchKeyValue(tesla, "parentname", sz_parentname);
 
+	DispatchKeyValue(tesla, "m_flRadius", "96.0");
+	DispatchKeyValue(tesla, "m_SoundName", "DoSpark");
+	DispatchKeyValue(tesla, "beamcount_min", "4");
+	DispatchKeyValue(tesla, "beamcount_max", "6");
+	DispatchKeyValue(tesla, "texture", "sprites/physbeam.vmt");
+	DispatchKeyValue(tesla, "m_Color", "255 255 255");
+	DispatchKeyValue(tesla, "thick_min", "1.0");
+	DispatchKeyValue(tesla, "thick_max", "10.0");
+	DispatchKeyValue(tesla, "lifetime_min", "0.3");
+	DispatchKeyValue(tesla, "lifetime_max", "0.3");
+	DispatchKeyValue(tesla, "interval_min", "0.1");
+	DispatchKeyValue(tesla, "interval_max", "0.2");
+#endif
+		DispatchSpawn(tesla);
+	SetEntityRenderColor(tesla,200,0,0,255);
+		AcceptEntityInput(tesla, "TurnOn");
+		AcceptEntityInput(tesla, "DoSpark");
+
+	
+		ActivateEntity(tesla);
+		AcceptEntityInput(tesla, "TurnOn");
 		// Teleport and attach
 		decl Float:fPosition[3];
 		GetEntPropVector(entid, Prop_Send, "m_vecOrigin", fPosition);
 		TeleportEntity(tesla, fPosition, NULL_VECTOR, NULL_VECTOR);
 		
+//return;
+#if 1
 		if (bAttach == true)
 		{
 			SetVariantString("!activator");
@@ -1080,10 +1133,11 @@ stock CreateTesla(entid,  entconfig[EEntityConfig], bool:bAttach=true)
 			}
 #endif
 		}
+#endif
+//		ActivateEntity(tesla);
 
-		DispatchSpawn(tesla);
-		ActivateEntity(tesla);
-		AcceptEntityInput(tesla, "TurnOn");
+
+
 
 	}
 }
