@@ -28,7 +28,7 @@
 
 #include <sdktools_sound.inc>
 
-#define VERSION  "0.26"
+#define VERSION  "0.26a"
 
 public Plugin:myinfo = {
 	name = "RN-Trails",
@@ -280,7 +280,8 @@ public OnEntityCreated(entid, const String:entityname[])
 	}	
 
 	if(entid < 0 || entid > sizeof(entity_state)){
-		PrintToServer("Entity id %d exceeds entity_state size!");
+		PrintToServer("Entity id %d exceeds entity_state size!", entid);
+		return;
 	}
 
 	entity_state[entid] = ENTITY_STATE_CREATED;
@@ -393,7 +394,7 @@ public OnGameFrame()
 
 
 				if(entconfig[trail_effect_activate] == 1 && (owner < 0 || owner > MaxClients)){
-					PrintToServer("Not applying trail to %s - owner = %d", entityname, owner);
+//					PrintToServer("Not applying trail to %s - owner = %d", entityname, owner);
 					continue;
 				}
 
@@ -403,7 +404,7 @@ public OnGameFrame()
 						if(entconfig[light] == Integer:999 ) {
 							StrikersCreateLight(entid, "65 105 225 128", 15.0, 5.0, true);
 						} else {
-							CreateLight(entid, entconfig, true, false);
+							CreateLight(entid, entconfig, true, true);
 						}
 					}
 
@@ -951,8 +952,9 @@ stock CreateLight(iEntity, entconfig[EEntityConfig], bool:bAttach = false, bool:
 		decho("CreateLight: Invalid entity %d", iEntity);
 	}
 	
-	if(bKill == true)
+	if(bKill == true && entconfig[light_time] > 0)
 	{
+//		PrintToServer("CreateTimer kill light %f ent=%d", entconfig[light_time], iLight);
 		CreateTimer(entconfig[light_time], Timer_KillLight, iLight);
 	}
 	
@@ -1007,6 +1009,7 @@ stock StrikersCreateLight(iEntity, String:strColor[], Float:distance, Float:time
 	if(bKill == true && time != 0)
 	{
 		CreateTimer(time, Timer_KillLight, iLight);
+//PrintToServer("Created light entity %d", iLight);
 	}
 	
 	return iLight;
@@ -1033,7 +1036,8 @@ public Action:Timer_KillParticle(Handle:timer, any:entity)
 // striker_hl2dm_epicexplosions.sp
 public Action:Timer_KillLight(Handle:timer, any:entity)
 {
-	if (IsValidEdict(entity))
+//	PrintToServer("In Timer_KillLight entity is %d", entity);
+	if (IsValidEntity(entity) || 1)
 	{
 		decl String:Classname[64];
 		GetEdictClassname(entity, Classname, sizeof(Classname));
@@ -1043,6 +1047,8 @@ public Action:Timer_KillLight(Handle:timer, any:entity)
 		{
 			AcceptEntityInput(entity, "kill");
 		}
+	} else {
+
 	}
 }
 
