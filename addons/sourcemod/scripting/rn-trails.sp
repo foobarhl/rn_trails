@@ -28,7 +28,7 @@
 
 #include <sdktools_sound.inc>
 
-#define VERSION  "0.26a"
+#define VERSION  "0.26b"
 
 public Plugin:myinfo = {
 	name = "RN-Trails",
@@ -41,7 +41,7 @@ public Plugin:myinfo = {
 
 new bool:_debug = true;
 
-#define MAX_TRAIL_ENTITIES	20	// Increase this if you have more than this number of entity defs in your config
+#define MAX_TRAIL_ENTITIES	50	// Increase this if you have more than this number of entity defs in your config
 
 #define TRAIL_EFFECT_NONE	Integer:0
 #define TRAIL_EFFECT_BEAM 	Integer:1
@@ -53,6 +53,10 @@ new bool:_debug = true;
 #define TRAIL_EFFECT_TESLA	Integer:7
 #define TRAIL_EFFECT_SMOKEPK 	Integer:8
 
+#define LIGHT_EFFECT_NONE	Integer:0
+
+#define OWNER_WORLD	0
+
 enum EEntityConfig
 {
 /*	String:trail_effect[21], */
@@ -61,6 +65,7 @@ enum EEntityConfig
 	Integer:trail_effect,
 	Integer:trail_effect_activate,	//"trail_effect_playeronly"
 	Integer:trail_beam_color_v4[4],
+	Bool:trail_beam_color_random,
 	Float:trail_beam_time,
 	Float:trail_beam_iwidth,
 	Float:trail_beam_ewidth,
@@ -158,8 +163,8 @@ new entityConfig[MAX_GROUPS][MAX_TRAIL_ENTITIES][EEntityConfig];//  = false;
 new String:entityConfigIdx[MAX_GROUPS][MAX_TRAIL_ENTITIES][50];
 new Integer:entityConfigIdxc[MAX_GROUPS];
 
-
-
+new cVarTeamplay = INVALID_HANDLE;
+new bool:bTeamPlay = false;
 
 
 public OnPluginStart()
@@ -182,9 +187,21 @@ public OnPluginStart()
 	}
 #endif
 	AddNormalSoundHook(BlockSound);
+	cVarTeamplay = FindConVar("mp_teamplay");
+	bTeamPlay = GetConVarBool(cVarTeamplay);
+	HookConVarChange(cVarTeamplay, OnTeamPlayChanged);
+
 	decho("OnPluginStart() finished");
 
 	return;
+}
+
+public OnTeamPlayChanged(Handle:convar, const String:oldval[], const String:newval[])
+{
+	if(StringToInt(newval)==1)
+		bTeamPlay = true;
+	else
+		bTeamPlay = false;
 }
 
 public OnMapStart()
@@ -213,23 +230,21 @@ public OnMapStart()
 			new entid=-1;
 			if(strlen(entityConfig[grpidx][i][sound_file])>0){
 				decl String:buffer2[200];
-				decho("Using %s", entityConfig[grpidx][i][sound_file]);
+//				decho("Using %s", entityConfig[grpidx][i][sound_file]);
 				PrecacheSound(entityConfig[grpidx][i][sound_file],true);
 				Format(buffer2,sizeof(buffer2),"sound/%s",entityConfig[grpidx][i][sound_file]);
 
-				decho("rn-trails: AddFileToDownloadsTable %s",buffer2);
+//				decho("rn-trails: AddFileToDownloadsTable %s",buffer2);
 				AddFileToDownloadsTable(buffer2);
 
 			}
 
 			while( (entid=FindEntityByClassname(entid, entityConfigIdx[grpidx][i])) != -1 ){
-				decho("Hook entity (in map startup) %d", entid);
 				SDKHook(entid, SDKHook_SpawnPost, OnEntitySpawned);
 				OnEntitySpawned(entid);	// xxx: 
 			}
 		}
 	}
-	decho("OnMapStart() finished");
 #if defined USETIMER
 	if(CreateTimer(0.1, TrailsTimer, _, TIMER_REPEAT)==false){
 		SetFailState("Could not create master timer!");
@@ -264,7 +279,7 @@ public Event_SdkHookOnTakeDamagePost(victim, attacker, inflictor, Float:damage, 
 	new Float:clipos[3];
 	GetClientEyePosition(victim,clipos);
 	new Float:vecDistance = GetVectorDistance(clipos,damagePosition);
-	decho("Victim %d hurt by %d distance=%f",victim,weapon,vecDistance);
+//	decho("Victim %d hurt by %d distance=%f",victim,weapon,vecDistance);
 
 //	hitGroups[victim]=hitgroup;
 }
@@ -305,7 +320,11 @@ public Integer:MyGetEntityOwner(entid, String:entityname[])
 	new owner=-1;	
 
 //	decho("Just for shits and giggles: m_iTeamNum for %d/%s is %d", entid, entityname, GetEntPropEnt(entid, Prop_Send, "m_iTeamNum"));
+
+	if(StrEqual(entityname,"beam"))
+	return 0;
 	owner = GetEntPropEnt(entid, Prop_Send, "m_hOwnerEntity");
+
 //	decho("GetEntPropEnt %d/%s m_hOwnerEntity = %d", entid, entityname, owner);
 	if(owner>=0){
 		return owner;
@@ -343,6 +362,10 @@ public Action:OnEntitySpawned(entid)
 	return(Plugin_Continue);
 }
 
+FooBar()
+{
+	PrintToServer("Foobar!");
+}
 #if defined USETIMER
 public Action:TrailsTimer(Handle:timer)
 #else
@@ -350,7 +373,9 @@ public OnGameFrame()
 #endif
 {
 	new entid = -1;
+	decl i2;
 	new Float:position[3];
+
 	decl String:entityname[100];
 	
 	decl entconfig[EEntityConfig];	
@@ -359,20 +384,28 @@ public OnGameFrame()
 
 //	i2max = sizeof(entityConfigIdx[grpid]);
 //decho("Ping");
+	
+	decl iMax;
+	if(bTeamPlay == false ){
+		iMax = 0;
+	} else {
+		iMax  = MAX_GROUPS-1;
+	}
 	new Integer:owner;
-	for(new i = MAX_GROUPS-1; i >=0; i--) {	// run through reverse groups first.  world comes last.
-		for(new i2 = 0; i2 < MAX_TRAIL_ENTITIES; i2++){
-		
-			if(entityConfigIdx[i][i2][0]=='\0'){
+	for(new i = iMax; i >= 0; i--) {	// run through reverse groups first.  world comes last.
+		for(i2 = 0; i2 < MAX_TRAIL_ENTITIES; i2++){
+			if(entityConfigIdx[i][i2][0]=='\0'){		// reached the last of configured entities in this group
 				break;
 			}
 
-			if(_GetEntityConfig(i,entityConfigIdx[i][i2], entconfig)==false){
+			if(_GetEntityConfig(i,entityConfigIdx[i][i2], entconfig)==false){	// this shouldn't happen
+				PrintToServer("Abort II   i=%d, i2=%d",i, i2);
 				continue;
 			}
 
-			if(entconfig[trail_effect] == TRAIL_EFFECT_NONE ) {
-//				break;
+			// no effects to apply on this entity
+			if(entconfig[trail_effect] == TRAIL_EFFECT_NONE && entconfig[light] == LIGHT_EFFECT_NONE && entconfig[sound_file][0] == '\0' ) {
+				continue;
 			}
 
 			strcopy(entityname,sizeof(entityname), entityConfigIdx[i][i2]);
@@ -381,10 +414,9 @@ public OnGameFrame()
 			while((entid = Entity_FindByClassName(entid,entityname))>0)
 			{
 
-
 				owner = MyGetEntityOwner(entid, entityname);
-//decho("Team is %d/%d %d", MyGetClientTeam(owner),i, owner);
-				if(MyGetClientTeam(owner) != i)
+
+				if(bTeamPlay == true && MyGetClientTeam(owner) != i)
 					continue;
 
 				if(entity_state[entid] == ENTITY_STATE_GF)
@@ -393,14 +425,14 @@ public OnGameFrame()
 					entity_state[entid] = ENTITY_STATE_GF;
 
 
-				if(entconfig[trail_effect_activate] == 1 && (owner < 0 || owner > MaxClients)){
+				if(entconfig[trail_effect_activate] == 1 && (owner <= OWNER_WORLD || owner > MaxClients)){
 //					PrintToServer("Not applying trail to %s - owner = %d", entityname, owner);
 					continue;
 				}
 
 				if(entity_state[entid] == ENTITY_STATE_GF){
 					// first frame from onspawn 
-					if(entconfig[light] != TRAIL_EFFECT_NONE ){
+					if(entconfig[light] != LIGHT_EFFECT_NONE ){
 						if(entconfig[light] == Integer:999 ) {
 							StrikersCreateLight(entid, "65 105 225 128", 15.0, 5.0, true);
 						} else {
@@ -412,17 +444,22 @@ public OnGameFrame()
 						EmitAmbientSound(entconfig[sound_file],position,entid);
 					}
 
+					if(StrEqual(entityname,"beam") ){
+	
+						Entity_SetRenderColor(entid,GetRandomInt(1,254), GetRandomInt(1,254), GetRandomInt(1,254));
+//						new moveparent = GetEntProp(entid, Prop_Data, "m_hAttachEntity");
+//						PrintToServer("moveparent = %d", moveparent);
+
+//						new m_clrRender = GetEntProp(entid, Prop_Send, "m_clrRender");
+//						PrintToServer("Color is %d", m_clrRender);
+//						SetEntProp(entid, "m_clrRender");
+					}
+
 				}
 
-//				decho("  Doing %d to %s",entconfig[trail_effect], entityname);
-
-//				decho("%s owner is %d", entityname,owner);
-				
-				GetEntPropVector(entid,Prop_Send,"m_vecOrigin",position);
 				switch(entconfig[trail_effect]){
 					case(TRAIL_EFFECT_BEAM):
 					{
-		//				decho("CreateBeam(%d,...)", entid);
 						if(entity_state[entid] == ENTITY_STATE_GF){	// only initiate once right after spawn.  follows entity
 							CreateBeam(entid, entconfig);
 						}
@@ -435,18 +472,23 @@ public OnGameFrame()
 					}
 
 					case(TRAIL_EFFECT_SMOKE): {
+						GetEntPropVector(entid,Prop_Send,"m_vecOrigin",position);
 						smoke(position,entconfig[smoke_scale],entconfig[smoke_framerate]);
 					} 
 					case(TRAIL_EFFECT_ENERGY): {
+						GetEntPropVector(entid,Prop_Send,"m_vecOrigin",position);
 						energy(position);
 					}
 					case(TRAIL_EFFECT_SPARK): {
+						GetEntPropVector(entid,Prop_Send,"m_vecOrigin",position);
 						spark(position,entconfig[sparks_scale],entconfig[sparks_framerate]);
 					}
 					case(TRAIL_EFFECT_DUST):{
+						GetEntPropVector(entid,Prop_Send,"m_vecOrigin",position);
 						dust(position,entconfig[dust_scale],entconfig[dust_framerate]);
 					}
 					case(TRAIL_EFFECT_RIBBON): {
+						GetEntPropVector(entid,Prop_Send,"m_vecOrigin",position);
 	//					FireSprites(position);//,scale,framerate);
 						ribbon(position);
 					}
@@ -457,7 +499,7 @@ public OnGameFrame()
 					}
 
 //					decho("rn-trails: Unknown effect '%d'  configured for %s!", entconfig[trail_effect], entityname);
-				}
+		}
 			}
 		}
 
@@ -544,6 +586,11 @@ public _ParseWeaponConfig(kv, Integer:grpid, String:entname[])
 	entconfig[trail_effect_activate] = KvGetNum(kv, "trail_effect_activate", 0);
 
 	KvGetString(kv, "trail_beam_color", buffer, sizeof(buffer), "0 0 0 0");
+	if(StrEqual(buffer,"random")){ 
+		entconfig[trail_beam_color_random] = true;
+	} else {
+		entconfig[trail_beam_color_random] = false;
+	}
 	ColorStringToV4(buffer, entconfig[trail_beam_color_v4]);
 
 	entconfig[trail_beam_time] = KvGetFloat(kv, "trail_beam_time", 2.0);
@@ -592,7 +639,6 @@ public _ParseWeaponConfig(kv, Integer:grpid, String:entname[])
 	strcopy(entityConfigIdx[grpid][entityConfigIdxc[grpid]], 100, entname);
 	entityConfigIdxc[grpid]++;
 //	_DumpWeaponConfig(entname,entconfig);
-	decho("Read config for %d/%s", grpid, entname);
 }
 
 public _ParseConfig(kv)
@@ -608,15 +654,12 @@ public _ParseConfig(kv)
 			do {
 				KvGetSectionName(kv, buffer2, sizeof(buffer2));
 				new grpid = StringToInt(buffer2);
-				PrintToServer("parse weapon config grpid=%d / %s", grpid, buffer2);
 #if 1
 				if(KvGotoFirstSubKey(kv,false)==false){
 					continue;
-					SetFailState("Section %s had no sub!", buffer2);
 				} else {
 					do {
 						KvGetSectionName(kv, buffer2, sizeof(buffer2));
-						PrintToServer("  parse grpid=%d section=%s", grpid, buffer2);
 						_ParseWeaponConfig(kv, grpid, buffer2);
 					
 					} while(KvGotoNextKey(kv,false));
@@ -628,7 +671,7 @@ public _ParseConfig(kv)
 
 			KvGoBack(kv);
 		} else {
-			decho("Ignore top level key %s", section);
+//			decho("Ignore top level key %s", section);
 		}
 	} while(KvGotoNextKey(kv));
 
@@ -692,10 +735,17 @@ public energy(Float:position[3])
 stock CreateBeam(entid, entconfig[EEntityConfig])
 {
 	new color[4] = {0,0,0,0};
-	color[0] = entconfig[trail_beam_color_v4][0];
-	color[1] = entconfig[trail_beam_color_v4][1];
-	color[2] = entconfig[trail_beam_color_v4][2];
-	color[3] = entconfig[trail_beam_color_v4][3];
+	if(entconfig[trail_beam_color_random]==true){
+		color[0] = GetRandomInt(1,255);
+		color[1] = GetRandomInt(1,255);
+		color[2] = GetRandomInt(1,255);
+		color[3] = GetRandomInt(100,255);
+	} else {
+		color[0] = entconfig[trail_beam_color_v4][0];
+		color[1] = entconfig[trail_beam_color_v4][1];
+		color[2] = entconfig[trail_beam_color_v4][2];
+		color[3] = entconfig[trail_beam_color_v4][3];
+	}
 
 	new time = entconfig[trail_beam_time];//2.0;
 	new iwidth = entconfig[trail_beam_iwidth];//100.0;
@@ -831,7 +881,7 @@ public Action:Event_PlayerHurt(Handle:event, const String:entname[], bool:dontBr
 //	new attacker = GetClientOfUserId(GetEventInt(event, "attacker"));
 //	new victim   = GetClientOfUserId(GetEventInt(event, "userid"));
 //	new headshot   = (GetEventInt(event, "health") == 0 && GetEventInt(event, "hitgroup") == 1);
-	decho("Victim health=%d hitgroup=%d",GetEventInt(event, "health") ,GetEventInt(event, "hitgroup"));
+//	decho("Victim health=%d hitgroup=%d",GetEventInt(event, "health") ,GetEventInt(event, "hitgroup"));
 
 	return(Plugin_Handled);
 }
@@ -854,7 +904,6 @@ public Action:Event_PlayerDeath(Handle:event, const String:entname[], bool:dontB
 			return Plugin_Continue;
 		}
 
-		decho("Player killed by crossbow");
 		if(StrEqual(entconfig[ondeath_effect],"fireworks")){	// todo: add more. 
 			GetClientAbsOrigin(client,clivec);
 			explode(clivec);
@@ -901,7 +950,7 @@ public DispatchKeyValueInt(ent, const String:var[], Integer:val)
 	decl String:buffer[50];
 	//IntToString(_:val, buffer, sizeof(buffer));
 	Format(buffer, sizeof(buffer), "%d", val);
-	decho("DispatchKeyValue(%d,%s,%s) (was %d)", ent, var, buffer,val);
+//	decho("DispatchKeyValue(%d,%s,%s) (was %d)", ent, var, buffer,val);
 	return(DispatchKeyValue(ent, var, buffer));
 }
 
@@ -949,7 +998,7 @@ stock CreateLight(iEntity, entconfig[EEntityConfig], bool:bAttach = false, bool:
 		ActivateEntity(iLight);
 		AcceptEntityInput(iLight, "TurnOn");
 	} else {
-		decho("CreateLight: Invalid entity %d", iEntity);
+//		decho("CreateLight: Invalid entity %d", iEntity);
 	}
 	
 	if(bKill == true && entconfig[light_time] > 0)
@@ -1091,25 +1140,6 @@ _DumpWeaponConfig("", entconfig);
 		DispatchKeyValue(tesla, "interval_min", entconfig[tesla_interval_min]);
 		DispatchKeyValue(tesla, "interval_max", entconfig[tesla_interval_max]);
 
-#else
-	new String:sz_lasername[32];
-	new String:sz_parentname[32];
-
-	Format(sz_parentname, sizeof(sz_parentname), "%d", entid);
-	DispatchKeyValue(tesla, "parentname", sz_parentname);
-
-	DispatchKeyValue(tesla, "m_flRadius", "96.0");
-	DispatchKeyValue(tesla, "m_SoundName", "DoSpark");
-	DispatchKeyValue(tesla, "beamcount_min", "4");
-	DispatchKeyValue(tesla, "beamcount_max", "6");
-	DispatchKeyValue(tesla, "texture", "sprites/physbeam.vmt");
-	DispatchKeyValue(tesla, "m_Color", "255 255 255");
-	DispatchKeyValue(tesla, "thick_min", "1.0");
-	DispatchKeyValue(tesla, "thick_max", "10.0");
-	DispatchKeyValue(tesla, "lifetime_min", "0.3");
-	DispatchKeyValue(tesla, "lifetime_max", "0.3");
-	DispatchKeyValue(tesla, "interval_min", "0.1");
-	DispatchKeyValue(tesla, "interval_max", "0.2");
 #endif
 		DispatchSpawn(tesla);
 	SetEntityRenderColor(tesla,200,0,0,255);
@@ -1122,6 +1152,10 @@ _DumpWeaponConfig("", entconfig);
 		// Teleport and attach
 		decl Float:fPosition[3];
 		GetEntPropVector(entid, Prop_Send, "m_vecOrigin", fPosition);
+		fPosition[0] += 5.0;
+		fPosition[1] += 5.0;
+		fPosition[2] += 5.0;
+	
 		TeleportEntity(tesla, fPosition, NULL_VECTOR, NULL_VECTOR);
 		
 //return;
